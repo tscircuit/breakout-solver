@@ -12,22 +12,22 @@ test("solves qfp16 breakout points to header pins with nearby passives", () => {
     {
       sourcePortId: "source_port_u1_vcc",
       sourceTraceId: "source_trace_j1_vcc_to_u1_vcc",
-      x: 3,
-      y: 3,
+      x: 2.2,
+      y: -3.5,
       layer: "top",
     },
     {
       sourcePortId: "source_port_u1_gnd",
       sourceTraceId: "source_trace_j1_gnd_to_u1_gnd",
       x: 3,
-      y: 3.5,
+      y: -3,
       layer: "top",
     },
     {
       sourcePortId: "source_port_u1_sda",
       sourceTraceId: "source_trace_j1_sda_to_u1_sda",
-      x: 0.7000000000000002,
-      y: -3.5,
+      x: 3,
+      y: -2.5,
       layer: "top",
     },
     {

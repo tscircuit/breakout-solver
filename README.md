@@ -5,10 +5,16 @@ routing area. It is useful for PCB routing flows where pads or ports inside a
 component boundary need a clean handoff point on the outside edge before routing
 continues to external targets.
 
-The solver projects each inside port toward the average position of its outside
-ports, intersects that ray with the configured boundary, and optionally moves
-the point along the same edge to satisfy spacing from already used breakout
-points.
+The solver assigns all inside ports to boundary points together. Same-layer
+crossings inside the boundary receive strict priority because they can force a
+fanout onto another copper layer. Crossings between boundary points and their
+outside targets are optimized second, so the assignment also accounts for the
+component it must connect to. The resulting points are fixed endpoints for a
+separate physical fanout router; this package does not route copper.
+
+Boundary spacing is a hard constraint. Pad intersections and total guide length
+are secondary costs, so a difficult obstacle arrangement cannot silently remove
+a required endpoint.
 
 ## Installation
 
