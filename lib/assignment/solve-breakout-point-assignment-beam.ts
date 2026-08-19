@@ -40,7 +40,10 @@ const getRequestCandidates = (
         request,
         boundaryPoint,
         pads: input.pads,
-        obstacleCrossingPenalty: scoringContext.obstacleCrossingPenalty,
+        components: input.components,
+        insideEscapeDirectionPenalty:
+          scoringContext.insideEscapeDirectionPenalty,
+        padCrossingGuidePenalty: scoringContext.padCrossingGuidePenalty,
       }),
     }),
   )

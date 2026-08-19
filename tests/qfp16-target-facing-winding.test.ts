@@ -1,8 +1,9 @@
 import { expect, test } from "bun:test"
 import { BreakoutPointSolver } from "lib/index"
 import type { BreakoutPointSolverInput } from "lib/types"
-import { countBreakoutPointWindings } from "lib/assignment/get-breakout-point-assignment-cost"
+import { countBreakoutPointInsideWindings } from "lib/assignment/get-breakout-point-assignment-cost"
 import { getBreakoutPointRequests } from "lib/assignment/get-breakout-point-requests"
+import { doesEscapeGuideReversePerimeterPadDirection } from "lib/component/does-escape-guide-reverse-perimeter-pad-direction"
 import fixture from "./assets/breakout-qfp16-with-header-and-passives.input.json"
 
 test("repro: qfp16 breakout points avoid winding around the package", () => {
@@ -31,6 +32,16 @@ test("repro: qfp16 breakout points avoid winding around the package", () => {
   })
 
   expect(breakoutPointAssignments).toHaveLength(fixture.traces.length)
-  expect(countBreakoutPointWindings(breakoutPointAssignments)).toBe(0)
+  expect(countBreakoutPointInsideWindings(breakoutPointAssignments)).toBe(0)
+  for (const assignment of breakoutPointAssignments) {
+    expect(
+      doesEscapeGuideReversePerimeterPadDirection({
+        insidePort: assignment.request.insidePort,
+        boundaryPoint: assignment.boundaryPoint,
+        components:
+          fixture.components as BreakoutPointSolverInput["components"],
+      }),
+    ).toBe(false)
+  }
   expect(solver).toMatchSolverSnapshot(import.meta.path)
 })

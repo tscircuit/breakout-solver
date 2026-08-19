@@ -2,9 +2,10 @@ import type { Point } from "@tscircuit/math-utils"
 import type { BreakoutPointSolverInput } from "../types"
 import { completeBreakoutPointAssignments } from "./complete-breakout-point-assignments"
 import {
-  countBreakoutPointInsideWindings,
   countBreakoutPointWindings,
+  countReversedPerimeterPadEscapes,
   createBreakoutPointAssignmentScoringContext,
+  getBreakoutPointAssignmentsCost,
   type BreakoutPointAssignment,
 } from "./get-breakout-point-assignment-cost"
 import {
@@ -43,29 +44,32 @@ const getBoundaryPointsFromAssignments = (
   return boundaryPointsByInsidePortKey
 }
 
-const hasFewerBreakoutPointWindings = (
+const hasLowerBreakoutPointAssignmentCost = (
   candidateAssignments: BreakoutPointAssignment[],
   currentAssignments: BreakoutPointAssignment[],
+  scoringContext: ReturnType<
+    typeof createBreakoutPointAssignmentScoringContext
+  >,
 ) => {
-  const candidateInsideWindingCount =
-    countBreakoutPointInsideWindings(candidateAssignments)
-  const currentInsideWindingCount =
-    countBreakoutPointInsideWindings(currentAssignments)
-  if (candidateInsideWindingCount !== currentInsideWindingCount) {
-    return candidateInsideWindingCount < currentInsideWindingCount
-  }
   return (
-    countBreakoutPointWindings(candidateAssignments) <
-    countBreakoutPointWindings(currentAssignments)
+    getBreakoutPointAssignmentsCost(candidateAssignments, scoringContext) <
+    getBreakoutPointAssignmentsCost(currentAssignments, scoringContext)
   )
 }
+
+const hasUnresolvedBreakoutTopology = (
+  assignments: BreakoutPointAssignment[],
+  input: BreakoutPointSolverInput,
+) =>
+  countBreakoutPointWindings(assignments) > 0 ||
+  countReversedPerimeterPadEscapes(assignments, input.components) > 0
 
 /**
  * Selects board-world breakout points in millimeters. Target positions and pad
  * obstacles guide candidate placement. Inside escape windings receive strict
- * priority, then target-guide windings rank the remaining assignments. The
- * fanout solver remains responsible for physically routing each escape to the
- * fixed endpoint selected here.
+ * priority, followed by the outward direction of elongated perimeter leads,
+ * then target-guide windings. The fanout solver remains responsible for
+ * physically routing each escape to the fixed endpoint selected here.
  */
 export function solveBreakoutPointWindings(input: BreakoutPointSolverInput) {
   const breakoutPointRequests = getBreakoutPointRequests(input.traces)
@@ -77,7 +81,8 @@ export function solveBreakoutPointWindings(input: BreakoutPointSolverInput) {
   })
   if (
     greedyAssignments.length === breakoutPointRequests.length &&
-    countBreakoutPointWindings(greedyAssignments) === 0
+    countBreakoutPointWindings(greedyAssignments) === 0 &&
+    countReversedPerimeterPadEscapes(greedyAssignments, input.components) === 0
   ) {
     return greedyBoundaryPointsByInsidePortKey
   }
@@ -101,9 +106,10 @@ export function solveBreakoutPointWindings(input: BreakoutPointSolverInput) {
     scoringContext,
   )
 
-  let preferredAssignments = hasFewerBreakoutPointWindings(
+  let preferredAssignments = hasLowerBreakoutPointAssignmentCost(
     globallyConstructedAssignments,
     completedGreedyAssignments,
+    scoringContext,
   )
     ? globallyConstructedAssignments
     : completedGreedyAssignments
@@ -112,23 +118,33 @@ export function solveBreakoutPointWindings(input: BreakoutPointSolverInput) {
       ? completedGreedyAssignments
       : globallyConstructedAssignments
 
-  if (countBreakoutPointWindings(preferredAssignments) > 0) {
+  if (hasUnresolvedBreakoutTopology(preferredAssignments, input)) {
     improveBreakoutPointAssignments(preferredAssignments, scoringContext)
   }
-  if (countBreakoutPointWindings(preferredAssignments) > 0) {
+  if (hasUnresolvedBreakoutTopology(preferredAssignments, input)) {
     improveBreakoutPointAssignments(alternateAssignments, scoringContext)
     if (
-      hasFewerBreakoutPointWindings(alternateAssignments, preferredAssignments)
+      hasLowerBreakoutPointAssignmentCost(
+        alternateAssignments,
+        preferredAssignments,
+        scoringContext,
+      )
     ) {
       preferredAssignments = alternateAssignments
     }
   }
-  if (countBreakoutPointWindings(preferredAssignments) > 0) {
+  if (hasUnresolvedBreakoutTopology(preferredAssignments, input)) {
     const beamAssignments = solveBreakoutPointAssignmentBeam(
       breakoutPointRequests,
       scoringContext,
     )
-    if (hasFewerBreakoutPointWindings(beamAssignments, preferredAssignments)) {
+    if (
+      hasLowerBreakoutPointAssignmentCost(
+        beamAssignments,
+        preferredAssignments,
+        scoringContext,
+      )
+    ) {
       preferredAssignments = beamAssignments
     }
   }

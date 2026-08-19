@@ -7,6 +7,7 @@ import {
   doesBreakoutSegmentIntersectNonIgnoredPads,
   doesBreakoutSegmentIntersectPads,
 } from "../pad/breakout-pad-collisions"
+import { doesEscapeGuideReversePerimeterPadDirection } from "../component/does-escape-guide-reverse-perimeter-pad-direction"
 import type { BreakoutPointSolverInput } from "../types"
 import type { BreakoutPointRequest } from "./get-breakout-point-requests"
 
@@ -20,13 +21,14 @@ type AssignmentGuideCostKey = string & {
 }
 
 const TARGET_GUIDE_WINDING_WEIGHT = 1_000
-const PHYSICAL_OBSTACLE_GUIDE_WEIGHT = 0.01
+const PAD_CROSSING_GUIDE_WEIGHT = 0.01
 
 export interface BreakoutPointAssignmentScoringContext {
   input: BreakoutPointSolverInput
   insideWindingPenalty: number
+  insideEscapeDirectionPenalty: number
   targetGuideWindingPenalty: number
-  obstacleCrossingPenalty: number
+  padCrossingGuidePenalty: number
   guideCostsByAssignmentKey: Map<AssignmentGuideCostKey, number>
 }
 
@@ -55,27 +57,36 @@ export function getBreakoutPointGuideCost({
   request,
   boundaryPoint,
   pads,
-  obstacleCrossingPenalty,
+  components,
+  insideEscapeDirectionPenalty,
+  padCrossingGuidePenalty,
 }: {
   request: BreakoutPointRequest
   boundaryPoint: Point
   pads: BreakoutPointSolverInput["pads"]
-  obstacleCrossingPenalty: number
+  components: BreakoutPointSolverInput["components"]
+  insideEscapeDirectionPenalty: number
+  padCrossingGuidePenalty: number
 }) {
   const inputPads = pads ?? []
   let guideCost = distance(request.insidePort.position, boundaryPoint)
 
-  if (
-    doesBreakoutSegmentIntersectPads({
-      from: request.insidePort.position,
-      to: boundaryPoint,
-      pads: inputPads,
-      sourcePortId: request.insidePort.sourcePortId,
-      layer: request.insidePort.layer,
+  const insideGuideCrossesPad = doesBreakoutSegmentIntersectPads({
+    from: request.insidePort.position,
+    to: boundaryPoint,
+    pads: inputPads,
+    sourcePortId: request.insidePort.sourcePortId,
+    layer: request.insidePort.layer,
+  })
+  const insideGuideReversesPerimeterPadDirection =
+    doesEscapeGuideReversePerimeterPadDirection({
+      insidePort: request.insidePort,
+      boundaryPoint,
+      components,
     })
-  ) {
-    guideCost += obstacleCrossingPenalty
-  }
+  if (insideGuideCrossesPad) guideCost += padCrossingGuidePenalty
+  if (insideGuideReversesPerimeterPadDirection)
+    guideCost += insideEscapeDirectionPenalty
 
   for (const outsidePort of request.outsidePorts) {
     guideCost += distance(boundaryPoint, outsidePort.position)
@@ -91,7 +102,7 @@ export function getBreakoutPointGuideCost({
         layer: request.insidePort.layer,
       })
     ) {
-      guideCost += obstacleCrossingPenalty
+      guideCost += padCrossingGuidePenalty
     }
   }
 
@@ -187,6 +198,24 @@ export function countBreakoutPointInsideWindings(
   return insideWindingCount
 }
 
+export function countReversedPerimeterPadEscapes(
+  assignments: BreakoutPointAssignment[],
+  components: BreakoutPointSolverInput["components"],
+) {
+  return assignments.reduce(
+    (count, assignment) =>
+      count +
+      Number(
+        doesEscapeGuideReversePerimeterPadDirection({
+          insidePort: assignment.request.insidePort,
+          boundaryPoint: assignment.boundaryPoint,
+          components,
+        }),
+      ),
+    0,
+  )
+}
+
 export function createBreakoutPointAssignmentScoringContext(
   input: BreakoutPointSolverInput,
 ): BreakoutPointAssignmentScoringContext {
@@ -202,16 +231,27 @@ export function createBreakoutPointAssignmentScoringContext(
   )
   const targetGuideWindingPenalty =
     boundsPerimeter * TARGET_GUIDE_WINDING_WEIGHT
-  // One inside winding can force the physical fanout onto another layer, so it
-  // must cost more than every possible target-guide winding combined.
   const maximumTargetGuideWindingCount = outsidePortCount ** 2
+  // Reversing an elongated perimeter lead points its escape behind the source
+  // package. Prefer every outward-facing assignment before optimizing target
+  // guides, while square BGA/header pads remain direction-neutral.
+  const insideEscapeDirectionPenalty =
+    targetGuideWindingPenalty * (maximumTargetGuideWindingCount + 1)
+  const insidePortCount = input.traces.reduce(
+    (count, trace) => count + trace.insidePorts.length,
+    0,
+  )
+  // One inside winding can force physical fanout onto another layer, so it
+  // must cost more than all escape-direction and target-guide penalties.
+  const insideWindingPenalty =
+    insideEscapeDirectionPenalty * (insidePortCount + 1)
 
   return {
     input,
-    insideWindingPenalty:
-      targetGuideWindingPenalty * (maximumTargetGuideWindingCount + 1),
+    insideWindingPenalty,
+    insideEscapeDirectionPenalty,
     targetGuideWindingPenalty,
-    obstacleCrossingPenalty: boundsPerimeter * PHYSICAL_OBSTACLE_GUIDE_WEIGHT,
+    padCrossingGuidePenalty: boundsPerimeter * PAD_CROSSING_GUIDE_WEIGHT,
     guideCostsByAssignmentKey: new Map<AssignmentGuideCostKey, number>(),
   }
 }
@@ -227,6 +267,33 @@ const getBreakoutPointAssignmentWindingCost = (
     insideWindingCount * scoringContext.insideWindingPenalty +
     targetGuideWindingCount * scoringContext.targetGuideWindingPenalty
   )
+}
+
+export function getBreakoutPointAssignmentsCost(
+  assignments: BreakoutPointAssignment[],
+  scoringContext: BreakoutPointAssignmentScoringContext,
+) {
+  let cost = 0
+  for (
+    let firstAssignmentIndex = 0;
+    firstAssignmentIndex < assignments.length;
+    firstAssignmentIndex++
+  ) {
+    const firstAssignment = assignments[firstAssignmentIndex]!
+    cost += getCachedAssignmentGuideCost(firstAssignment, scoringContext)
+    for (
+      let secondAssignmentIndex = firstAssignmentIndex + 1;
+      secondAssignmentIndex < assignments.length;
+      secondAssignmentIndex++
+    ) {
+      cost += getBreakoutPointAssignmentWindingCost(
+        firstAssignment,
+        assignments[secondAssignmentIndex]!,
+        scoringContext,
+      )
+    }
+  }
+  return cost
 }
 
 const getAssignmentGuideCostKey = (assignment: BreakoutPointAssignment) =>
@@ -246,7 +313,9 @@ const getCachedAssignmentGuideCost = (
     request: assignment.request,
     boundaryPoint: assignment.boundaryPoint,
     pads: scoringContext.input.pads,
-    obstacleCrossingPenalty: scoringContext.obstacleCrossingPenalty,
+    components: scoringContext.input.components,
+    insideEscapeDirectionPenalty: scoringContext.insideEscapeDirectionPenalty,
+    padCrossingGuidePenalty: scoringContext.padCrossingGuidePenalty,
   })
   scoringContext.guideCostsByAssignmentKey.set(
     assignmentGuideCostKey,
