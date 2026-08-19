@@ -12,8 +12,8 @@ test("solves soic8 fanout points to i2c header pins with pullups nearby", () => 
     {
       sourcePortId: "source_port_u1_vcc",
       sourceTraceId: "source_trace_j1_vcc_to_u1_vcc",
-      x: -4.4,
-      y: 0.7999999999999998,
+      x: 2.15,
+      y: 3.2,
       layer: "top",
     },
     {
@@ -26,8 +26,8 @@ test("solves soic8 fanout points to i2c header pins with pullups nearby", () => 
     {
       sourcePortId: "source_port_u1_sda",
       sourceTraceId: "source_trace_j1_sda_to_u1_sda",
-      x: -4.4,
-      y: 1.5338961038961039,
+      x: -3.4000000000000004,
+      y: 3.2,
       layer: "top",
     },
     {
